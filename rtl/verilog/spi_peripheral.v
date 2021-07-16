@@ -9,6 +9,7 @@ module spi_slave (
     wb_dat_o,
     wb_stb_i,
     wb_cyc_i,
+    wb_we_i,
     wb_ack_o,
     wb_err_o,
     wb_int_o,
@@ -35,12 +36,13 @@ input [7:0]			wb_adr_i;
 input [7:0]			wb_dat_i;
 input				wb_stb_i;
 input				wb_cyc_i;
+input				wb_we_i;
 // Outputs
 output reg [7:0]		wb_dat_o;
 output reg			wb_ack_o;
 output reg			wb_err_o;
 output reg			wb_int_o;
-
+output reg			wb_stall_o;
 //SPI
 // Inputs
 input				sclk_i;
@@ -59,6 +61,7 @@ reg				sclk_i_reg;
 reg				cs_i_reg;
 reg				tx_complete;
 reg				rx_complete;
+reg				active_transfer;
 
 wire				sclk_pos_edge;
 wire				sclk_neg_edge;
@@ -75,6 +78,7 @@ begin
     tx_data = 0;
     tx_complete = 0;
     cs_i_reg = 0;
+    active_transfer = 0;
 end
 
 //assertion: wb_clk_i is much faster than sclk_i
@@ -180,12 +184,27 @@ begin
     end
 end
 
+always@(posedge wb_clk_i or posedge wb_rst_i)
+begin
+    if (wb_rst_i) begin
+	active_transfer <= 1'b0;
+    end
+    else begin
+	if (tx_bit_count != 0 || rx_bit_count != 0) begin
+	    active_transfer <= 1'b1;
+	else begin
+	    active_transfer <= 1'b0;
+	end
+    end
+end
+
 initial
 begin
     wb_dat_o = 0;
     wb_ack_o = 0;
     wb_err_o = 0;
     wb_int_o = 0;
+    wb_stall_o = 0;
 end
 
 always@(posedge wb_clk_i or posedge wb_rst_i)
@@ -200,6 +219,24 @@ begin
 	/* only reset interrupt when there was a successfull transmission on the SPI lines */
 	else if (wb_ack_o && !wb_stb_i) begin
 	    wb_int_o <= 1'b0;
+	end
+    end
+end
+
+always@(posedge wb_clk_i or posedge wb_rst_i)
+begin
+    if (wb_rst_i) begin
+	tx_data <= {SPI_BUS_WIDTH{1'b0}};
+	wb_stall_o <= 1'b0;
+    end
+    else begin
+	if (wb_we_i && !active_transfer) begin
+	    //TODO: implement concatentations for mismatch of SPI_BUS_WIDTH and Wb_DATA_WIDTH
+	    tx_data <= wb_data_i;
+	    wb_stall_o <= 1'b0;
+	end
+	else  begin
+	    wb_stall_o <= 1'b1;
 	end
     end
 end
