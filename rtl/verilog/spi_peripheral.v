@@ -1,4 +1,4 @@
-`include "spi_peripheral_defines.v"
+`include "rtl/verilog/spi_peripheral_defines.v"
 
 module spi_slave (
     // Wishbone Signals
@@ -194,7 +194,7 @@ begin
 	    end
 
 	    if (tx_complete) begin
-		tx_bit_count <= SPI_BUS_WIDTH'b0;
+		tx_bit_count <= {SPI_BUS_WIDTH{1'b0}};
 	    end
 	    else begin
 		tx_bit_count <= tx_bit_count;
@@ -242,6 +242,7 @@ begin
     else begin
 	if (tx_bit_count != 0 || rx_bit_count != 0) begin
 	    active_transfer <= 1'b1;
+	end
 	else begin
 	    active_transfer <= 1'b0;
 	end
@@ -265,7 +266,7 @@ begin
     else begin
 	if (!cs_i_reg && (tx_complete || rx_complete)) begin
 	//if (tx_complete || rx_complete) begin
-	    wb_int_o <= 1'b1'
+	    wb_int_o <= 1'b1;
 	end
 	/* only reset interrupt when there was a successfull transmission on the SPI lines */
 	else if (wb_ack_o && !wb_stb_i) begin
