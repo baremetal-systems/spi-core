@@ -74,13 +74,16 @@ wire				transmit_step;
 
 initial
 begin
+    sclk_i_reg = 0;
+    cs_i_reg = 1;
     rx_bit_count = 0;
+    rx_reg_addr_count = 0;
     rx_data = 0;
     rx_complete = 0;
     tx_bit_count = 0;
+    tx_reg_addr_count = 0;
     tx_data = 0;
     tx_complete = 0;
-    cs_i_reg = 0;
     active_transfer = 0;
 end
 
