@@ -141,6 +141,36 @@ begin
     end
 end
 
+always@(posedge wb_clk_i or posedge wb_rst_i)
+begin
+    if (wb_rst_i) begin
+	rx_reg_addr_count <= 0;
+	tx_reg_addr_count <= 0;
+    end
+    else begin
+	if (rx_complete) begin
+	    rx_reg_addr_count <= rx_reg_addr_count + 1'b1;
+	end
+	else if (rx_reg_addr_count == SPI_REG_CNT) begin
+	    rx_reg_addr_count <= 0;
+	end
+	else begin
+	    rx_reg_addr_count <= rx_reg_addr_count;
+	end
+
+	if (tx_complete) begin
+	    tx_reg_addr_count <= tx_reg_addr_count + 1'b1;
+	end
+	else if (tx_reg_addr_count == SPI_REG_CNT) begin
+	    tx_reg_addr_count <= 0;
+	end
+	else begin
+	    tx_reg_addr_count <= tx_reg_addr_count;
+	end
+    end
+end
+
+
 /* SPI TRANSMIT */
 always@(posedge wb_clk_i or posedge wb_rst_i)
 begin
@@ -224,7 +254,7 @@ begin
     wb_ack_o = 0;
     wb_err_o = 0;
     wb_int_o = 0;
-    wb_stall_o = 0;
+    wb_rty_o = 0;
 end
 
 always@(posedge wb_clk_i or posedge wb_rst_i)
@@ -247,17 +277,32 @@ end
 always@(posedge wb_clk_i or posedge wb_rst_i)
 begin
     if (wb_rst_i) begin
+	wb_ack_o <= 1'b0;
+    end
+    else begin
+	if (wb_cyc_i & wb_stb_i & ~wb_ack_o) begin
+	    wb_ack_o <= 1'b1;
+	end
+	else begin
+	    wb_ack_o <= 1'b0;
+	end
+    end
+end
+
+always@(posedge wb_clk_i or posedge wb_rst_i)
+begin
+    if (wb_rst_i) begin
 	tx_data <= {SPI_BUS_WIDTH{1'b0}};
-	wb_stall_o <= 1'b0;
+	wb_rty_o <= 1'b0;
     end
     else begin
 	if (wb_we_i && !active_transfer) begin
 	    //TODO: implement concatentations for mismatch of SPI_BUS_WIDTH and Wb_DATA_WIDTH
 	    tx_data <= wb_data_i;
-	    wb_stall_o <= 1'b0;
+	    wb_rty_o <= 1'b0;
 	end
 	else  begin
-	    wb_stall_o <= 1'b1;
+	    wb_rty_o <= 1'b1;
 	end
     end
 end
