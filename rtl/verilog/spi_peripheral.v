@@ -20,11 +20,12 @@ module spi_slave (
     miso_o
 );
 
+/*
 parameter SPI_BUS_WIDTH	    = 8;
 parameter SPI_CPOL	    = 1'b0;
 parameter SPI_CPHA	    = 1'b0;
 parameter SPI_LSB	    = 1'b0;
-
+*/
 
 parameter TP = 1;
 
@@ -51,8 +52,10 @@ input				mosi_i;
 // Output(s)
 output				miso_o;
 
-reg [7:0]			rx_bit_count;
-reg [7:0]			tx_bit_count;
+reg [SPI_COUNT_WIDTH -1:0]	rx_bit_count;
+reg [SPI_COUNT_WIDTH -1:0]	rx_reg_addr_count;
+reg [SPI_COUNT_WIDTH -1:0]	tx_reg_addr_count;
+reg [SPI_COUNT_WIDTH -1:0]	tx_bit_count;
 reg [SPI_BUS_WIDTH -1:0]	rx_data;
 reg [SPI_BUS_WIDTH -1:0]	tx_data;
 reg				tx_transmit_bit;
