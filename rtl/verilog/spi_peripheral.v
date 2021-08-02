@@ -92,7 +92,7 @@ always@(posedge wb_clk_i or posedge wb_rst_i)
 begin
     if (wb_rst_i) begin
 	sclk_i_reg <= 1'b0;
-	cs_i_reg <= 1'b0;
+	cs_i_reg <= 1'b1;
     end
     else begin
 	sclk_i_reg <= sclk_i;
@@ -113,18 +113,25 @@ begin
 	rx_bit_count <= 8'b0;
     end
     else begin
-	if (cs_i_reg) begin
+	if (!cs_i_reg) begin
 	    if (transmit_step) begin
-		if (~SPI_LSB) begin
-		    rx_data <= {mosi_i, rx_data[(SPI_BUS_WIDTH -2):0]}; 
+		if (~SPI_LSB_FRST) begin
+		    rx_data <= {mosi_i, rx_data[(SPI_BUS_WIDTH -1):1]}; 
 		end
 		else begin
 		    rx_data <= {rx_data[(SPI_BUS_WIDTH -2):0], mosi_i};
 		end
+
 		rx_bit_count <= rx_bit_count + 1'b1;
 	    end
 	    else begin
 		rx_data <= rx_data;
+	    end
+	    if (rx_complete) begin
+		rx_bit_count <= {SPI_BUS_WIDTH{1'b0}};
+	    end
+	    else begin
+		rx_bit_count <= rx_bit_count;
 	    end
 	end
 	else begin
@@ -143,8 +150,8 @@ begin
 	tx_bit_count <= 8'b0;
     end
     else begin
-	if (cs_i_reg) begin
-	    if (~SPI_LSB) begin
+	if (!cs_i_reg) begin
+	    if (~SPI_LSB_FRST) begin
 		tx_transmit_bit <= tx_data [(SPI_BUS_WIDTH -1) - tx_bit_count];
 	    end
 	    else begin
@@ -154,6 +161,13 @@ begin
 	    if (transmit_step) begin
 		tx_start <= 1'b1;
 		tx_bit_count <= tx_bit_count + 1'b1;
+	    end
+
+	    if (tx_complete) begin
+		tx_bit_count <= SPI_BUS_WIDTH'b0;
+	    end
+	    else begin
+		tx_bit_count <= tx_bit_count;
 	    end
 	end
 	else begin
@@ -219,7 +233,8 @@ begin
 	wb_int_o <= 1'b0;
     end
     else begin
-	if (tx_complete || rx_complete) begin
+	if (!cs_i_reg && (tx_complete || rx_complete)) begin
+	//if (tx_complete || rx_complete) begin
 	    wb_int_o <= 1'b1'
 	end
 	/* only reset interrupt when there was a successfull transmission on the SPI lines */
