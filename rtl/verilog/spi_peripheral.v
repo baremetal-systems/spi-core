@@ -9,6 +9,7 @@ module spi_slave (
     wb_dat_o,
     wb_stb_i,
     wb_cyc_i,
+    wb_we_i,
     wb_ack_o,
     wb_err_o,
     wb_int_o,
@@ -19,62 +20,71 @@ module spi_slave (
     miso_o
 );
 
+/*
 parameter SPI_BUS_WIDTH	    = 8;
 parameter SPI_CPOL	    = 1'b0;
 parameter SPI_CPHA	    = 1'b0;
 parameter SPI_LSB	    = 1'b0;
-
+*/
 
 parameter TP = 1;
 
 // WB
 //Inputs
-input				wb_clk_i;
-input				wb_rst_i;
-input [7:0]			wb_adr_i;
-input [7:0]			wb_dat_i;
-input				wb_stb_i;
-input				wb_cyc_i;
+input                       wb_clk_i;
+input                       wb_rst_i;
+input [7:0]                 wb_adr_i;
+input [7:0]                 wb_dat_i;
+input                       wb_stb_i;
+input                       wb_cyc_i;
+input                       wb_we_i;
 // Outputs
-output reg [7:0]		wb_dat_o;
-output reg			wb_ack_o;
-output reg			wb_err_o;
-output reg			wb_int_o;
-
+output reg [7:0]            wb_dat_o;
+output reg                  wb_ack_o;
+output reg                  wb_err_o;
+output reg                  wb_int_o;
+output reg                  wb_stall_o;
 //SPI
 // Inputs
-input				sclk_i;
-input				cs_i;
-input				mosi_i;
+input                       sclk_i;
+input                       cs_i;
+input                       mosi_i;
 // Output(s)
-output				miso_o;
+output                      miso_o;
 
-reg [7:0]			rx_bit_count;
-reg [7:0]			tx_bit_count;
+reg [SPI_COUNT_WIDTH -1:0]	rx_bit_count;
+reg [SPI_COUNT_WIDTH -1:0]	rx_reg_addr_count;
+reg [SPI_COUNT_WIDTH -1:0]	tx_reg_addr_count;
+reg [SPI_COUNT_WIDTH -1:0]	tx_bit_count;
 reg [SPI_BUS_WIDTH -1:0]	rx_data;
-reg [SPI_BUS_WIDTH -1:0]	tx_data;
-reg				tx_transmit_bit;
-reg				tx_start;
-reg				sclk_i_reg;
-reg				cs_i_reg;
-reg				tx_complete;
-reg				rx_complete;
+reg [SPI_BUS_WIDTH -1:0]    tx_data;
+reg                         tx_transmit_bit;
+reg                         tx_start;
+reg                         sclk_i_reg;
+reg                         cs_i_reg;
+reg                         tx_complete;
+reg                         rx_complete;
+reg                         active_transfer;
 
-wire				sclk_pos_edge;
-wire				sclk_neg_edge;
-wire				transmit_step;
+wire                        sclk_pos_edge;
+wire                        sclk_neg_edge;
+wire                        transmit_step;
 //wire				tx_complete;
 //wire				rx_complete;
 
 initial
 begin
+    sclk_i_reg = 0;
+    cs_i_reg = 1;
     rx_bit_count = 0;
+    rx_reg_addr_count = 0;
     rx_data = 0;
     rx_complete = 0;
     tx_bit_count = 0;
+    tx_reg_addr_count = 0;
     tx_data = 0;
     tx_complete = 0;
-    cs_i_reg = 0;
+    active_transfer = 0;
 end
 
 //assertion: wb_clk_i is much faster than sclk_i
@@ -82,7 +92,7 @@ always@(posedge wb_clk_i or posedge wb_rst_i)
 begin
     if (wb_rst_i) begin
 	sclk_i_reg <= 1'b0;
-	cs_i_reg <= 1'b0;
+	cs_i_reg <= 1'b1;
     end
     else begin
 	sclk_i_reg <= sclk_i;
@@ -99,57 +109,106 @@ assign transmit_step = (~(SPI_CPOL ^ SPI_CPHA) & sclk_pos_edge) | (SPI_CPOL ^ SP
 always@(posedge wb_clk_i or posedge wb_rst_i)
 begin
     if (wb_rst_i) begin
-	rx_data <= {SPI_BUS_WIDTH{1'b0}};
-	rx_bit_count <= 8'b0;
+        rx_data <= {SPI_BUS_WIDTH{1'b0}};
+        rx_bit_count <= 8'b0;
     end
     else begin
-	if (cs_i_reg) begin
-	    if (transmit_step) begin
-		if (~SPI_LSB) begin
-		    rx_data <= {mosi_i, rx_data[(SPI_BUS_WIDTH -2):0]}; 
-		end
-		else begin
-		    rx_data <= {rx_data[(SPI_BUS_WIDTH -2):0], mosi_i};
-		end
-		rx_bit_count <= rx_bit_count + 1'b1;
-	    end
-	    else begin
-		rx_data <= rx_data;
-	    end
-	end
-	else begin
-	    rx_data <= {SPI_BUS_WIDTH{1'b0}};
-	    rx_bit_count <= 8'b0;
-	end
+        if (!cs_i_reg) begin
+            if (transmit_step) begin
+                if (~SPI_LSB_FRST) begin
+                    rx_data <= {mosi_i, rx_data[(SPI_BUS_WIDTH -1):1]};
+                end
+                else begin
+                    rx_data <= {rx_data[(SPI_BUS_WIDTH -2):0], mosi_i};
+                end
+
+                rx_bit_count <= rx_bit_count + 1'b1;
+            end
+            else begin
+                rx_data <= rx_data;
+            end
+
+            if (rx_complete) begin
+                rx_bit_count <= {SPI_BUS_WIDTH{1'b0}};
+            end
+            else begin
+                rx_bit_count <= rx_bit_count;
+            end
+        end
+        else begin
+            rx_data <= {SPI_BUS_WIDTH{1'b0}};
+            rx_bit_count <= 8'b0;
+        end
     end
 end
+
+always@(posedge wb_clk_i or posedge wb_rst_i)
+begin
+    if (wb_rst_i) begin
+        rx_reg_addr_count <= 0;
+        tx_reg_addr_count <= 0;
+    end
+    else begin
+        if (rx_complete) begin
+            rx_reg_addr_count <= rx_reg_addr_count + 1'b1;
+        end
+        else if (rx_reg_addr_count == SPI_REG_CNT) begin
+            rx_reg_addr_count <= 0;
+        end
+        else begin
+            rx_reg_addr_count <= rx_reg_addr_count;
+        end
+
+        if (tx_complete) begin
+            tx_reg_addr_count <= tx_reg_addr_count + 1'b1;
+        end
+        else if (tx_reg_addr_count == SPI_REG_CNT) begin
+            tx_reg_addr_count <= 0;
+        end
+        else begin
+            tx_reg_addr_count <= tx_reg_addr_count;
+        end
+    end
+end
+
 
 /* SPI TRANSMIT */
 always@(posedge wb_clk_i or posedge wb_rst_i)
 begin
     if (wb_rst_i) begin
-	tx_data <= {SPI_BUS_WIDTH{1'b0}};
-	tx_start <= 1'b0;
-	tx_bit_count <= 8'b0;
+        tx_data <= {SPI_BUS_WIDTH{1'b0}};
+        tx_start <= 1'b0;
+        tx_bit_count <= 8'b0;
     end
     else begin
-	if (cs_i_reg) begin
-	    if (~SPI_LSB) begin
-		tx_transmit_bit <= tx_data [(SPI_BUS_WIDTH -1) - tx_bit_count];
-	    end
-	    else begin
-		tx_transmit_bit <= tx_data [tx_bit_count];
-	    end
+        if (!cs_i_reg) begin
+            if (~SPI_LSB_FRST) begin
+                tx_transmit_bit <= tx_data [(SPI_BUS_WIDTH -1) - tx_bit_count];
+            end
+            else begin
+                tx_transmit_bit <= tx_data [tx_bit_count];
+            end
 
-	    if (transmit_step) begin
-		tx_start <= 1'b1;
-		tx_bit_count <= tx_bit_count + 1'b1;
-	    end
-	end
-	else begin
-	    tx_start <= 1'b0;
-	    tx_bit_count <= 8'b0;
-	end
+            if (transmit_step) begin
+                tx_start <= 1'b1;
+                tx_bit_count <= tx_bit_count + 1'b1;
+            end
+            else begin
+				tx_start <= tx_start;
+				tx_bit_count <= tx_bit_count;
+            end
+
+            if (tx_complete) begin
+                tx_bit_count <= {SPI_BUS_WIDTH{1'b0}};
+            end
+            else begin
+                tx_bit_count <= tx_bit_count;
+            end
+        end
+        else begin
+            tx_start <= 1'b0;
+            tx_bit_count <= 8'b0;
+        end
     end
 end
 
@@ -160,23 +219,38 @@ assign miso_o = (tx_start) ? tx_transmit_bit : 1'bz;
 always@(posedge wb_clk_i or posedge wb_rst_i)
 begin
     if (wb_rst_i) begin
-	rx_complete <= 1'b0;
-	tx_complete <= 1'b0;
+        rx_complete <= 1'b0;
+        tx_complete <= 1'b0;
     end
     else begin
-	if (tx_bit_count == (SPI_BUS_WIDTH -1)) begin
-	    tx_complete <= 1'b1;
-	end
-	else begin
-	    tx_complete <= 1'b0;
-	end
+        if (tx_bit_count == (SPI_BUS_WIDTH -1)) begin
+            tx_complete <= 1'b1;
+        end
+        else begin
+            tx_complete <= 1'b0;
+        end
 
-	if (rx_bit_count == (SPI_BUS_WIDTH -1)) begin
-	    rx_complete <= 1'b1;
-	end
-	else begin
-	    rx_complete <= 1'b0;
-	end
+        if (rx_bit_count == (SPI_BUS_WIDTH -1)) begin
+            rx_complete <= 1'b1;
+        end
+        else begin
+            rx_complete <= 1'b0;
+        end
+    end
+end
+
+always@(posedge wb_clk_i or posedge wb_rst_i)
+begin
+    if (wb_rst_i) begin
+        active_transfer <= 1'b0;
+    end
+        else begin
+        if (tx_bit_count != 0 || rx_bit_count != 0) begin
+            active_transfer <= 1'b1;
+        end
+        else begin
+            active_transfer <= 1'b0;
+        end
     end
 end
 
@@ -186,21 +260,56 @@ begin
     wb_ack_o = 0;
     wb_err_o = 0;
     wb_int_o = 0;
+    wb_rty_o = 0;
 end
 
 always@(posedge wb_clk_i or posedge wb_rst_i)
 begin
     if (wb_rst_i) begin
-	wb_int_o <= 1'b0;
+        wb_int_o <= 1'b0;
     end
     else begin
-	if (tx_complete || rx_complete) begin
-	    wb_int_o <= 1'b1'
-	end
-	/* only reset interrupt when there was a successfull transmission on the SPI lines */
-	else if (wb_ack_o && !wb_stb_i) begin
-	    wb_int_o <= 1'b0;
-	end
+        if (!cs_i_reg && (tx_complete || rx_complete)) begin
+        //if (tx_complete || rx_complete) begin
+            wb_int_o <= 1'b1;
+        end
+        /* only reset interrupt when there was a successfull transmission on the SPI lines */
+        else if (wb_ack_o && !wb_stb_i) begin
+            wb_int_o <= 1'b0;
+        end
+    end
+end
+
+always@(posedge wb_clk_i or posedge wb_rst_i)
+begin
+    if (wb_rst_i) begin
+        wb_ack_o <= 1'b0;
+    end
+    else begin
+        if (wb_cyc_i & wb_stb_i & ~wb_ack_o) begin
+            wb_ack_o <= 1'b1;
+        end
+        else begin
+            wb_ack_o <= 1'b0;
+        end
+    end
+end
+
+always@(posedge wb_clk_i or posedge wb_rst_i)
+begin
+    if (wb_rst_i) begin
+        tx_data <= {SPI_BUS_WIDTH{1'b0}};
+        wb_rty_o <= 1'b0;
+    end
+    else begin
+        if (wb_we_i && !active_transfer) begin
+            //TODO: implement concatentations for mismatch of SPI_BUS_WIDTH and Wb_DATA_WIDTH
+            tx_data <= wb_data_i;
+            wb_rty_o <= 1'b0;
+        end
+        else  begin
+            wb_rty_o <= 1'b1;
+        end
     end
 end
 
